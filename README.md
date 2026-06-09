@@ -11,42 +11,45 @@ Multi-tenant collaborative AI chat platform built with React, Vite, TypeScript, 
 - Firestore location: `nam5`
 - Gemini model: `gemini-2.5-flash-lite`
 
-## Demo Credentials
+## Demo Users
 
-All seeded demo users use the same password:
+There is no signup flow. The app is evaluated with seeded Firebase Auth users.
+
+All seeded users use this password:
 
 ```text
 Test1234!
 ```
 
-Acme tenant:
+ACME:
 
 - `sarah@acme.test` - admin
 - `mike@acme.test` - member
 - `lisa@acme.test` - member
 
-Globex tenant:
+GLOBEX:
 
 - `ana@globex.test` - admin
 - `diego@globex.test` - member
 - `carla@globex.test` - member
 
-## Main Features
+## Features
 
-- Firebase Auth email/password login.
-- Multi-tenant organization isolation using Firestore rules.
-- Room-based chat with admin-managed membership.
-- Realtime messages using Firestore listeners.
-- Typing indicators and online presence per room.
-- Message timestamps and unread room indicators.
+- Multi-tenant organizations identified by unique slugs: `acme`, `globex`.
+- Firebase Auth email/password login with seeded users.
+- Admin/member roles.
+- Admins can create rooms and manage room members.
+- Rooms support optional descriptions and custom Gemini persona prompts.
+- Only room members can see and send messages.
+- Realtime messages through Firestore listeners.
+- Sender name, role, timestamp, and message content on every message.
+- Typing indicators and room-level online presence.
 - Lightweight message threading with inline replies.
-- Distinct Gemini AI messages with streaming state.
-- `@Gemini` and `@AI` mentions trigger AI responses.
-- Backend validates Firebase ID tokens before calling Vertex AI.
-- Backend validates organization and room membership before sending context to Gemini.
-- Gemini retry UI, graceful error states, and backend retry with backoff for transient AI failures.
-- Frontend deployed to Firebase Hosting.
-- Backend deployed to Cloud Run.
+- Gemini responds when explicitly mentioned with `@Gemini`, `@AI`, or `@IA`.
+- Gemini responses stream to Firestore in chunks so all room members see updates.
+- Backend validates Firebase ID tokens, organization access, and room membership before calling Gemini.
+- Backend retries transient Gemini failures with exponential backoff.
+- Definitive Gemini failures are logged and shown as clear error states.
 
 ## Tech Stack
 
@@ -54,7 +57,7 @@ Globex tenant:
 - Backend: Node.js, Express, TypeScript, Firebase Admin SDK.
 - Realtime data: Cloud Firestore.
 - Authentication: Firebase Auth.
-- AI: Vertex AI Gemini through Google Cloud REST streaming.
+- AI: Vertex AI Gemini REST streaming.
 - Hosting: Firebase Hosting.
 - API runtime: Cloud Run.
 - Container build: Cloud Build + Artifact Registry.
@@ -71,36 +74,32 @@ multichat/
   docs/
     billing-vertex-ai.md
     deploy-cloud-run.md
-    progreso.md
+    TEST_CREDENTIALS.md
   Dockerfile             Cloud Run container image
   firebase.json          Firebase Hosting + Firestore config
+  firestore.indexes.json Firestore indexes
   firestore.rules        Firestore security rules
   package.json           Monorepo scripts
 ```
 
 ## Architecture
 
-The browser handles Firebase Auth and realtime Firestore subscriptions directly. Sensitive operations stay on the backend.
+The frontend handles Firebase Auth and Firestore realtime subscriptions. Sensitive AI work stays on the backend.
 
 ```text
 React app
-  | Firebase Auth login
-  | Firestore realtime listeners
-  v
-Firestore
-  | tenant data, rooms, messages, typing, presence, read states
+  -> Firebase Auth login
+  -> Firestore realtime listeners
+  -> rooms, messages, typing, presence, read states
 
 React app
-  | POST /api/ai/stream with Firebase ID token
-  v
-Cloud Run API
-  | verify Firebase token
-  | verify org + room membership
-  | build bounded conversation context
-  | call Vertex AI Gemini
-  | write streaming chunks back to Firestore
-  v
-Firestore realtime listeners update all room members
+  -> POST /api/ai/stream with Firebase ID token
+  -> Cloud Run API
+  -> verify token, tenant, room, and membership
+  -> build bounded Gemini context
+  -> call Vertex AI Gemini
+  -> write AI chunks back to Firestore
+  -> all room members receive updates through Firestore listeners
 ```
 
 ## Firestore Data Model
@@ -117,16 +116,36 @@ organizations/{orgSlug}/rooms/{roomId}/readStates/{uid}
 userProfiles/{uid}
 ```
 
-Important rules:
+Security model:
 
-- Organization document ids are tenant slugs, for example `organizations/acme` and `organizations/globex`.
-- Seed data validates that organization slugs are unique before writing tenant data.
+- Organization document ids are tenant slugs, for example `organizations/acme`.
 - Users can only read their own `userProfiles/{uid}` document.
 - Users can only list rooms where `memberIds` contains their Firebase UID.
 - Users can only read/write messages in rooms where they are members.
 - Only admins can create rooms and manage room members.
 - Each user can only write their own typing, presence, and read-state documents.
-- Backend repeats auth and membership checks before calling Gemini.
+- The backend repeats access checks before Gemini receives any room context.
+
+## Gemini Context
+
+Gemini receives a bounded room context:
+
+- Room name, room description, and optional room persona prompt.
+- Last `40` eligible messages.
+- Maximum context size of `20000` characters.
+- User attribution in the format `[User Name] message`.
+- Thread context when replying to a specific message.
+- Empty, failed, streaming, and system messages are excluded.
+
+This keeps long conversations manageable without scanning the full room history.
+
+## Error Handling
+
+- Transient Gemini errors are retried automatically with backoff.
+- Definitive errors, such as invalid model names or permission failures, are not retried.
+- Backend errors are logged with request, tenant, and room metadata.
+- Users see a graceful Gemini error message instead of a broken UI.
+- Failed Gemini messages cannot be replied to.
 
 ## Local Setup
 
@@ -176,13 +195,13 @@ gcloud auth application-default set-quota-project multichat-ai-b5cea
 Run frontend:
 
 ```powershell
-npm.cmd run dev --workspace @multichat/web
+npm.cmd run dev
 ```
 
 Run backend:
 
 ```powershell
-npm.cmd run dev --workspace @multichat/api
+npm.cmd run dev:api
 ```
 
 Open:
@@ -193,7 +212,7 @@ http://localhost:5173
 
 ## Seed Data
 
-Run after Firebase Admin credentials are available:
+Run this after Firebase Admin credentials are available:
 
 ```powershell
 npm.cmd run seed --workspace @multichat/api
@@ -201,38 +220,27 @@ npm.cmd run seed --workspace @multichat/api
 
 The seed creates:
 
-- 2 organizations identified by unique slugs: `acme`, `globex`.
+- 2 organizations: `acme`, `globex`.
 - 3 users per organization.
 - Initial rooms, memberships, and sample messages.
 
 ## AI Flow
 
-Users trigger Gemini by sending a message that contains:
-
-```text
-@Gemini
-@AI
-@IA
-```
-
-Flow:
-
-1. Frontend writes the user message to Firestore.
-2. Frontend calls `POST /api/ai/stream` with the Firebase ID token.
-3. Backend verifies the token.
-4. Backend verifies room membership.
-5. Backend reads recent room messages.
-6. Backend filters empty, failed, streaming, and system messages from context.
-7. Backend calls Vertex AI Gemini.
-8. Backend creates a Gemini message in Firestore.
-9. Backend updates that message as chunks arrive.
-10. Firestore pushes updates to all room members.
+1. User sends a message containing `@Gemini`, `@AI`, or `@IA`.
+2. Frontend writes the user message to Firestore.
+3. Frontend calls `POST /api/ai/stream` with the Firebase ID token.
+4. Backend verifies auth and room access.
+5. Backend builds bounded Gemini context.
+6. Backend calls Vertex AI Gemini.
+7. Backend creates a Gemini message in Firestore.
+8. Backend updates that message as response chunks arrive.
+9. Firestore pushes updates to every room participant.
 
 ## Production Deployment
 
 ### Backend
 
-Backend deployment guide:
+Detailed backend deployment steps are in:
 
 ```text
 docs/deploy-cloud-run.md
@@ -284,30 +292,30 @@ Current Firebase Hosting URL:
 https://multichat-ai-b5cea.web.app
 ```
 
-## Validation Commands
+## Validation
 
-Typecheck all workspaces:
+Run tests:
+
+```powershell
+npm.cmd run test
+```
+
+Run typecheck:
 
 ```powershell
 npm.cmd run typecheck
 ```
 
-Build frontend:
+Build all workspaces:
 
 ```powershell
-npm.cmd run build --workspace @multichat/web
+npm.cmd run build
 ```
 
-Build backend:
+Run lint:
 
 ```powershell
-npm.cmd run build:api
-```
-
-Deploy Firestore rules:
-
-```powershell
-npx.cmd firebase-tools deploy --only firestore:rules --project multichat-ai-b5cea
+npm.cmd run lint
 ```
 
 Check backend health:
@@ -319,13 +327,14 @@ Invoke-WebRequest -UseBasicParsing "https://multichat-api-436954625005.us-centra
 ## Security Notes
 
 - `.env`, `.env.local`, and `.env.production` are ignored by Git.
-- `AI_DEBUG_LOGS=false` is used in production to avoid logging full conversation prompts.
 - Firestore rules enforce tenant and room boundaries.
-- The backend does not trust client-provided membership; it rechecks access before calling Gemini.
+- The backend does not trust client-provided membership.
+- Gemini only receives context after backend access validation.
+- `AI_DEBUG_LOGS=false` is used in production to avoid logging full prompts.
 - Cloud Run uses Google Cloud service account permissions for Firestore and Vertex AI.
 
 ## Known Notes
 
-- The frontend bundle is split into `firebase`, `react`, `vendor`, and app chunks to avoid one oversized JavaScript asset.
-- `npm audit` still reports moderate advisories from `@google-cloud/storage`, which is a transitive dependency of `firebase-admin`; no direct Storage API is used by this app.
 - Firestore-based presence uses heartbeat + expiration because Firestore does not provide browser `onDisconnect`.
+- Frontend chunks are split into `firebase`, `react`, `vendor`, and app bundles.
+- `npm audit` may report moderate advisories from transitive Google Cloud packages used by Firebase Admin.
