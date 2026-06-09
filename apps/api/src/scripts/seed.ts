@@ -10,7 +10,9 @@ const organizations = [
     users: [
       { email: "sarah@acme.test", displayName: "Sarah", role: "admin" },
       { email: "mike@acme.test", displayName: "Mike", role: "member" },
-      { email: "lisa@acme.test", displayName: "Lisa", role: "member" }
+      { email: "lisa@acme.test", displayName: "Lisa", role: "member" },
+      { email: "james@acme.test", displayName: "James", role: "member" },
+      { email: "olivia@acme.test", displayName: "Olivia", role: "member" }
     ],
     rooms: [
       {
@@ -21,7 +23,9 @@ const organizations = [
         messages: [
           { senderEmail: "sarah@acme.test", content: "We need to decide on the caching strategy for our API." },
           { senderEmail: "mike@acme.test", content: "I'm thinking Redis, but worried about costs at scale." },
-          { senderEmail: "lisa@acme.test", content: "We're already on GCP, should we consider Memorystore?" }
+          { senderEmail: "lisa@acme.test", content: "We're already on GCP, should we consider Memorystore?" },
+          { senderEmail: "james@acme.test", content: "Latency matters most for the dashboard endpoints." },
+          { senderEmail: "olivia@acme.test", content: "Can we start with short TTLs and monitor cache hit rate?" }
         ]
       },
       {
@@ -30,7 +34,9 @@ const organizations = [
         description: "Company-wide chat",
         aiPersonaPrompt: "Act as a friendly team facilitator. Keep answers short, inclusive, and action-oriented.",
         messages: [
-          { senderEmail: "sarah@acme.test", content: "Welcome to TeamChat AI." }
+          { senderEmail: "sarah@acme.test", content: "Welcome to TeamChat AI." },
+          { senderEmail: "james@acme.test", content: "I'll use this room for rollout updates." },
+          { senderEmail: "olivia@acme.test", content: "Great, I'll post customer feedback summaries here." }
         ]
       }
     ]
@@ -41,7 +47,9 @@ const organizations = [
     users: [
       { email: "ana@globex.test", displayName: "Ana", role: "admin" },
       { email: "diego@globex.test", displayName: "Diego", role: "member" },
-      { email: "carla@globex.test", displayName: "Carla", role: "member" }
+      { email: "carla@globex.test", displayName: "Carla", role: "member" },
+      { email: "marco@globex.test", displayName: "Marco", role: "member" },
+      { email: "nina@globex.test", displayName: "Nina", role: "member" }
     ],
     rooms: [
       {
@@ -51,7 +59,10 @@ const organizations = [
         aiPersonaPrompt: "Act as a pragmatic product strategist. Compare options through user impact, implementation effort, and measurable outcomes.",
         messages: [
           { senderEmail: "ana@globex.test", content: "Let's compare options for onboarding flows." },
-          { senderEmail: "diego@globex.test", content: "@Gemini summarize the tradeoffs for a wizard versus checklist." }
+          { senderEmail: "diego@globex.test", content: "@Gemini summarize the tradeoffs for a wizard versus checklist." },
+          { senderEmail: "carla@globex.test", content: "The checklist might be easier to iterate on for the first release." },
+          { senderEmail: "marco@globex.test", content: "A wizard could reduce confusion for new users if we keep it short." },
+          { senderEmail: "nina@globex.test", content: "Let's measure completion rate and time-to-first-action either way." }
         ]
       }
     ]

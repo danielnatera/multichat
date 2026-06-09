@@ -17,6 +17,8 @@ Test1234!
 | Sarah | `sarah@acme.test` | Admin |
 | Mike | `mike@acme.test` | Member |
 | Lisa | `lisa@acme.test` | Member |
+| James | `james@acme.test` | Member |
+| Olivia | `olivia@acme.test` | Member |
 
 ## Globex Tenant
 
@@ -25,6 +27,8 @@ Test1234!
 | Ana | `ana@globex.test` | Admin |
 | Diego | `diego@globex.test` | Member |
 | Carla | `carla@globex.test` | Member |
+| Marco | `marco@globex.test` | Member |
+| Nina | `nina@globex.test` | Member |
 
 ## Verification Steps
 

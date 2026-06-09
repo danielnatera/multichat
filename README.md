@@ -312,7 +312,7 @@ The seed creates:
 
 ## AI Flow
 
-1. User sends a message containing `@Gemini`, `@AI`, or `@IA`.
+1. User sends a message containing `@Gemini` or `@AI`.
 2. Frontend writes the user message to Firestore.
 3. Frontend calls `POST /api/ai/stream` with the Firebase ID token.
 4. Backend verifies auth and room access.
