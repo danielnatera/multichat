@@ -36,14 +36,16 @@ El backend está configurado con:
 GOOGLE_CLOUD_LOCATION=global
 GEMINI_MODEL=gemini-2.5-flash-lite
 GEMINI_MAX_OUTPUT_TOKENS=512
-GEMINI_HISTORY_LIMIT=20
+GEMINI_HISTORY_LIMIT=40
+GEMINI_CONTEXT_CHAR_LIMIT=20000
 ```
 
 Razón:
 
 - `gemini-2.5-flash-lite` está orientado a baja latencia y coste.
 - `GEMINI_MAX_OUTPUT_TOKENS=512` limita la longitud de cada respuesta.
-- `GEMINI_HISTORY_LIMIT=20` evita enviar conversaciones enormes.
+- `GEMINI_HISTORY_LIMIT=40` limita la ventana a los últimos mensajes útiles.
+- `GEMINI_CONTEXT_CHAR_LIMIT=20000` evita enviar conversaciones enormes al modelo.
 
 ## Antes de activar billing
 
@@ -97,4 +99,3 @@ MOCK_GEMINI=true
 ```
 
 Y reiniciar backend.
-

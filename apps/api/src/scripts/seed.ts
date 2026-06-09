@@ -5,7 +5,6 @@ const defaultPassword = "Test1234!";
 // Seed data is intentionally small but cross-tenant, so evaluators can test isolation quickly.
 const organizations = [
   {
-    id: "acme",
     name: "Acme Corp",
     slug: "acme",
     users: [
@@ -18,6 +17,7 @@ const organizations = [
         id: "engineering",
         name: "engineering",
         description: "API and platform decisions",
+        aiPersonaPrompt: "Act as a concise senior backend architect. Focus on tradeoffs, operational risk, cloud cost, and concrete next steps.",
         messages: [
           { senderEmail: "sarah@acme.test", content: "We need to decide on the caching strategy for our API." },
           { senderEmail: "mike@acme.test", content: "I'm thinking Redis, but worried about costs at scale." },
@@ -28,6 +28,7 @@ const organizations = [
         id: "general",
         name: "general",
         description: "Company-wide chat",
+        aiPersonaPrompt: "Act as a friendly team facilitator. Keep answers short, inclusive, and action-oriented.",
         messages: [
           { senderEmail: "sarah@acme.test", content: "Welcome to TeamChat AI." }
         ]
@@ -35,7 +36,6 @@ const organizations = [
     ]
   },
   {
-    id: "globex",
     name: "Globex",
     slug: "globex",
     users: [
@@ -48,6 +48,7 @@ const organizations = [
         id: "product",
         name: "product",
         description: "Product strategy",
+        aiPersonaPrompt: "Act as a pragmatic product strategist. Compare options through user impact, implementation effort, and measurable outcomes.",
         messages: [
           { senderEmail: "ana@globex.test", content: "Let's compare options for onboarding flows." },
           { senderEmail: "diego@globex.test", content: "@Gemini summarize the tradeoffs for a wizard versus checklist." }
@@ -56,6 +57,18 @@ const organizations = [
     ]
   }
 ] as const;
+
+function assertUniqueOrganizationSlugs() {
+  const slugs = new Set<string>();
+
+  for (const org of organizations) {
+    if (slugs.has(org.slug)) {
+      throw new Error(`Duplicate organization slug in seed data: ${org.slug}`);
+    }
+
+    slugs.add(org.slug);
+  }
+}
 
 async function getOrCreateUser(email: string, displayName: string) {
   try {
@@ -72,8 +85,11 @@ async function getOrCreateUser(email: string, displayName: string) {
 }
 
 async function seed() {
+  assertUniqueOrganizationSlugs();
+
   for (const org of organizations) {
-    await firestore.collection("organizations").doc(org.id).set({
+    // The organization slug is the tenant identifier and the Firestore document id.
+    await firestore.collection("organizations").doc(org.slug).set({
       name: org.name,
       slug: org.slug
     });
@@ -89,14 +105,14 @@ async function seed() {
 
       const profile = {
         uid: firebaseUser.uid,
-        orgId: org.id,
+        orgId: org.slug,
         displayName: user.displayName,
         email: user.email,
         role: user.role
       };
 
       // userProfiles is a convenience lookup for the signed-in user; tenant-scoped users remain canonical.
-      await firestore.collection("organizations").doc(org.id).collection("users").doc(firebaseUser.uid).set(profile);
+      await firestore.collection("organizations").doc(org.slug).collection("users").doc(firebaseUser.uid).set(profile);
       await firestore.collection("userProfiles").doc(firebaseUser.uid).set(profile);
     }
 
@@ -105,12 +121,13 @@ async function seed() {
     const memberIds = [...usersByEmail.values()].map((user) => user.uid);
 
     for (const room of org.rooms) {
-      const roomRef = firestore.collection("organizations").doc(org.id).collection("rooms").doc(room.id);
+      const roomRef = firestore.collection("organizations").doc(org.slug).collection("rooms").doc(room.id);
 
       await roomRef.set({
-        orgId: org.id,
+        orgId: org.slug,
         name: room.name,
         description: room.description,
+        aiPersonaPrompt: room.aiPersonaPrompt,
         memberIds,
         createdAt: new Date()
       });
@@ -130,7 +147,7 @@ async function seed() {
         }
 
         await roomRef.collection("messages").add({
-          orgId: org.id,
+          orgId: org.slug,
           roomId: room.id,
           senderId: sender.uid,
           senderName: sender.displayName,

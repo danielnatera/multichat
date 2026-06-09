@@ -39,11 +39,12 @@ Globex tenant:
 - Realtime messages using Firestore listeners.
 - Typing indicators and online presence per room.
 - Message timestamps and unread room indicators.
+- Lightweight message threading with inline replies.
 - Distinct Gemini AI messages with streaming state.
 - `@Gemini` and `@AI` mentions trigger AI responses.
 - Backend validates Firebase ID tokens before calling Vertex AI.
 - Backend validates organization and room membership before sending context to Gemini.
-- Gemini retry UI for failed responses.
+- Gemini retry UI, graceful error states, and backend retry with backoff for transient AI failures.
 - Frontend deployed to Firebase Hosting.
 - Backend deployed to Cloud Run.
 
@@ -105,19 +106,21 @@ Firestore realtime listeners update all room members
 ## Firestore Data Model
 
 ```text
-organizations/{orgId}
-organizations/{orgId}/users/{uid}
-organizations/{orgId}/rooms/{roomId}
-organizations/{orgId}/rooms/{roomId}/members/{uid}
-organizations/{orgId}/rooms/{roomId}/messages/{messageId}
-organizations/{orgId}/rooms/{roomId}/presence/{uid}
-organizations/{orgId}/rooms/{roomId}/typing/{uid}
-organizations/{orgId}/rooms/{roomId}/readStates/{uid}
+organizations/{orgSlug}
+organizations/{orgSlug}/users/{uid}
+organizations/{orgSlug}/rooms/{roomId}
+organizations/{orgSlug}/rooms/{roomId}/members/{uid}
+organizations/{orgSlug}/rooms/{roomId}/messages/{messageId}
+organizations/{orgSlug}/rooms/{roomId}/presence/{uid}
+organizations/{orgSlug}/rooms/{roomId}/typing/{uid}
+organizations/{orgSlug}/rooms/{roomId}/readStates/{uid}
 userProfiles/{uid}
 ```
 
 Important rules:
 
+- Organization document ids are tenant slugs, for example `organizations/acme` and `organizations/globex`.
+- Seed data validates that organization slugs are unique before writing tenant data.
 - Users can only read their own `userProfiles/{uid}` document.
 - Users can only list rooms where `memberIds` contains their Firebase UID.
 - Users can only read/write messages in rooms where they are members.
@@ -155,7 +158,8 @@ GOOGLE_CLOUD_PROJECT=multichat-ai-b5cea
 GOOGLE_CLOUD_LOCATION=global
 GEMINI_MODEL=gemini-2.5-flash-lite
 GEMINI_MAX_OUTPUT_TOKENS=512
-GEMINI_HISTORY_LIMIT=20
+GEMINI_HISTORY_LIMIT=40
+GEMINI_CONTEXT_CHAR_LIMIT=20000
 WEB_ORIGIN=http://localhost:5173
 MOCK_GEMINI=false
 AI_DEBUG_LOGS=true
@@ -197,7 +201,7 @@ npm.cmd run seed --workspace @multichat/api
 
 The seed creates:
 
-- 2 organizations: `acme`, `globex`.
+- 2 organizations identified by unique slugs: `acme`, `globex`.
 - 3 users per organization.
 - Initial rooms, memberships, and sample messages.
 
@@ -208,6 +212,7 @@ Users trigger Gemini by sending a message that contains:
 ```text
 @Gemini
 @AI
+@IA
 ```
 
 Flow:
@@ -246,7 +251,8 @@ GOOGLE_CLOUD_PROJECT=multichat-ai-b5cea
 GOOGLE_CLOUD_LOCATION=global
 GEMINI_MODEL=gemini-2.5-flash-lite
 GEMINI_MAX_OUTPUT_TOKENS=512
-GEMINI_HISTORY_LIMIT=20
+GEMINI_HISTORY_LIMIT=40
+GEMINI_CONTEXT_CHAR_LIMIT=20000
 WEB_ORIGIN=https://multichat-ai-b5cea.web.app
 MOCK_GEMINI=false
 AI_DEBUG_LOGS=false

@@ -63,7 +63,7 @@ gcloud run deploy $SERVICE `
   --region $REGION `
   --allow-unauthenticated `
   --port 8080 `
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-2.5-flash-lite,GEMINI_MAX_OUTPUT_TOKENS=512,GEMINI_HISTORY_LIMIT=20,WEB_ORIGIN=https://multichat-ai-b5cea.web.app,MOCK_GEMINI=false,AI_DEBUG_LOGS=false"
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-2.5-flash-lite,GEMINI_MAX_OUTPUT_TOKENS=512,GEMINI_HISTORY_LIMIT=40,GEMINI_CONTEXT_CHAR_LIMIT=20000,WEB_ORIGIN=https://multichat-ai-b5cea.web.app,MOCK_GEMINI=false,AI_DEBUG_LOGS=false"
 ```
 
 ## 8. Verify deployment
