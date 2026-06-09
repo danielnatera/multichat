@@ -104,6 +104,8 @@ React app
 
 ## Firestore Data Model
 
+Tenant data lives under `organizations/{orgSlug}`. The organization slug is both the public tenant identifier and the Firestore document id.
+
 ```text
 organizations/{orgSlug}
 organizations/{orgSlug}/users/{uid}
@@ -115,6 +117,90 @@ organizations/{orgSlug}/rooms/{roomId}/typing/{uid}
 organizations/{orgSlug}/rooms/{roomId}/readStates/{uid}
 userProfiles/{uid}
 ```
+
+Document schemas:
+
+```ts
+// organizations/{orgSlug}
+{
+  name: string;
+  slug: string;
+}
+
+// organizations/{orgSlug}/users/{uid}
+// userProfiles/{uid}
+{
+  uid: string;
+  orgId: string; // tenant slug
+  displayName: string;
+  email: string;
+  role: "admin" | "member";
+}
+
+// organizations/{orgSlug}/rooms/{roomId}
+{
+  orgId: string; // tenant slug
+  name: string;
+  description?: string;
+  aiPersonaPrompt?: string;
+  memberIds: string[];
+  createdAt: Timestamp | Date;
+}
+
+// organizations/{orgSlug}/rooms/{roomId}/members/{uid}
+{
+  uid: string;
+  displayName: string;
+  joinedAt: Timestamp | Date;
+}
+
+// organizations/{orgSlug}/rooms/{roomId}/messages/{messageId}
+{
+  orgId: string; // tenant slug
+  roomId: string;
+  senderId: string;
+  senderName: string;
+  senderRole?: "admin" | "member";
+  type: "user" | "ai" | "system";
+  content: string;
+  parentMessageId?: string;
+  parentSenderName?: string;
+  parentMessagePreview?: string;
+  createdAt: Timestamp | Date;
+  status?: "streaming" | "complete" | "error";
+}
+
+// organizations/{orgSlug}/rooms/{roomId}/presence/{uid}
+{
+  displayName: string;
+  isOnline: boolean;
+  lastSeen: Timestamp;
+  expiresAt: Timestamp;
+}
+
+// organizations/{orgSlug}/rooms/{roomId}/typing/{uid}
+{
+  displayName: string;
+  isTyping: boolean;
+  updatedAt: Timestamp;
+  expiresAt: Timestamp;
+}
+
+// organizations/{orgSlug}/rooms/{roomId}/readStates/{uid}
+{
+  uid: string;
+  lastReadAt: Timestamp;
+  lastReadMessageId: string | null;
+  updatedAt: Timestamp;
+}
+```
+
+Query patterns:
+
+- Rooms are listed with `where("memberIds", "array-contains", uid)`.
+- Messages are read from one room subcollection ordered by `createdAt`.
+- Gemini context reads the newest room messages with `orderBy("createdAt", "desc")` and `limit(40)`.
+- Presence and typing are room-scoped and filtered client-side by `expiresAt`.
 
 Security model:
 

@@ -50,7 +50,7 @@ describe("getAiErrorMessage", () => {
 
   it("returns a clear invalid model message", () => {
     expect(getAiErrorMessage(new Error("Vertex AI REST 404 Not Found: Publisher Model was not found"))).toBe(
-      "Gemini model is not available."
+      "Gemini model is not available or is misconfigured. Check the configured model name."
     );
   });
 });
