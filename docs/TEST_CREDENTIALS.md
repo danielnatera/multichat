@@ -1,6 +1,6 @@
 # Test Credentials and Verification Guide
 
-This document contains the seeded demo accounts used to evaluate TeamChat AI.
+This document contains the seeded demo accounts used to test TeamChat AI.
 
 ## Login Credentials
 

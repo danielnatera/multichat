@@ -14,9 +14,14 @@
     "build:api": "npm run build --workspace @multichat/shared && npm run build --workspace @multichat/api",
     "start:api": "npm run start --workspace @multichat/api",
     "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces"
   },
   "devDependencies": {
-    "typescript": "^5.8.3"
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.8"
   }
 }

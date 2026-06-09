@@ -2,6 +2,8 @@ import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { assertRoomAccess } from "../lib/access.js";
+import { buildGeminiContext, type RoomData, type RoomMessageData } from "../lib/aiContext.js";
+import { getAiErrorMessage, isDefinitiveAiError, serializeError, shouldRetryAiError } from "../lib/aiErrors.js";
 import { logAiDebug } from "../lib/aiLogger.js";
 import { firestore } from "../lib/firebaseAdmin.js";
 import { streamGeminiResponse } from "../lib/gemini.js";
@@ -22,189 +24,8 @@ interface GeminiStreamChunk {
   }>;
 }
 
-const historyLimit = Number(process.env.GEMINI_HISTORY_LIMIT ?? 40);
-const contextCharLimit = Number(process.env.GEMINI_CONTEXT_CHAR_LIMIT ?? 20000);
 const aiRetryDelaysMs = [600, 1400, 2800];
-
-interface RoomMessageData {
-  senderId?: string;
-  senderName?: string;
-  type?: "user" | "ai" | "system";
-  content?: string;
-  parentMessageId?: string;
-  parentSenderName?: string;
-  parentMessagePreview?: string;
-  status?: "streaming" | "complete" | "error";
-}
-
-interface RoomData {
-  name?: string;
-  description?: string;
-  aiPersonaPrompt?: string;
-}
-
-function isUsefulContextMessage(message: RoomMessageData) {
-  const content = message.content?.trim();
-
-  if (!content) {
-    return false;
-  }
-
-  if (message.status === "error" || message.status === "streaming") {
-    return false;
-  }
-
-  if (message.type === "system") {
-    return false;
-  }
-
-  return true;
-}
-
-function formatContextMessage(message: RoomMessageData) {
-  const speaker = message.type === "ai" ? "Gemini AI" : message.senderName ?? "Unknown user";
-  const replyContext = message.parentMessageId
-    ? ` replying to ${message.parentSenderName ?? "a previous message"}: "${message.parentMessagePreview ?? ""}"`
-    : "";
-
-  return `[${speaker}${replyContext}] ${message.content?.trim()}`;
-}
-
-function fitMessagesWithinContextLimit(messages: RoomMessageData[]) {
-  const selectedMessages: RoomMessageData[] = [];
-  let totalCharacters = 0;
-
-  // Keep the newest messages first when the room is too long for the configured context budget.
-  for (const message of [...messages].reverse()) {
-    const formattedMessage = formatContextMessage(message);
-    const nextTotalCharacters = totalCharacters + formattedMessage.length + 1;
-
-    if (selectedMessages.length > 0 && nextTotalCharacters > contextCharLimit) {
-      break;
-    }
-
-    selectedMessages.unshift(message);
-    totalCharacters = nextTotalCharacters;
-  }
-
-  return {
-    messages: selectedMessages,
-    totalCharacters
-  };
-}
-
-function buildGeminiContext(messages: RoomMessageData[], room: RoomData, roomId: string) {
-  // Keep the prompt focused on real conversation, not failed development attempts or partial AI writes.
-  const boundedMessages = messages.filter(isUsefulContextMessage).slice(-historyLimit);
-  const contextWindow = fitMessagesWithinContextLimit(boundedMessages);
-  const usefulMessages = contextWindow.messages;
-  const lastUserMessage = [...usefulMessages].reverse().find((message) => message.type === "user");
-  const participants = usefulMessages
-    .filter((message) => message.type === "user" && message.senderName)
-    .map((message) => message.senderName as string)
-    .filter((name, index, names) => names.indexOf(name) === index);
-
-  const history = usefulMessages.map(formatContextMessage).join("\n");
-
-  const prompt = [
-    "You are Gemini AI inside a collaborative multi-user team chat.",
-    "Use the conversation context to answer the room, not just the last speaker.",
-    "Always preserve user attribution: understand who said what and address people by name when useful.",
-    "Ignore previous technical error messages, empty AI messages, and failed AI attempts.",
-    "If the latest user request is vague, ask one concise clarifying question instead of inventing context.",
-    `Room: #${room.name?.trim() || roomId}.`,
-    `Room description: ${room.description?.trim() || "No room description provided."}`,
-    // Room personas are flexible, but the shared guardrails above stay consistent across tenants.
-    room.aiPersonaPrompt?.trim()
-      ? `Room AI persona/instructions: ${room.aiPersonaPrompt.trim().slice(0, 1200)}`
-      : "Room AI persona/instructions: Use a concise, practical, collaborative assistant style.",
-    "Follow the room AI persona unless it conflicts with user attribution, tenant isolation, or the immediate user request.",
-    `Participants in this context: ${participants.length > 0 ? participants.join(", ") : "unknown"}.`,
-    `Last user message: ${lastUserMessage?.senderName ?? "unknown"} said "${lastUserMessage?.content?.trim() ?? ""}".`,
-    "Conversation history:",
-    history || "No useful conversation history is available."
-  ].join("\n\n");
-
-  return {
-    prompt,
-    usefulMessages,
-    contextCharacters: contextWindow.totalCharacters,
-    truncatedMessages: boundedMessages.length - usefulMessages.length,
-    lastUserMessage,
-    participants
-  };
-}
-
-function serializeError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-      cause: error.cause instanceof Error ? serializeError(error.cause) : error.cause
-    };
-  }
-
-  return {
-    message: String(error),
-    value: error
-  };
-}
-
-function getAiErrorMessage(error: unknown) {
-  const rawMessage = error instanceof Error ? error.message : "AI request failed.";
-
-  if (rawMessage.includes("BILLING_DISABLED")) {
-    return "Vertex AI requires billing to be enabled for this project.";
-  }
-
-  if (rawMessage.includes("SERVICE_DISABLED") || rawMessage.includes("aiplatform.googleapis.com")) {
-    return "Vertex AI API is not enabled yet or is still propagating. Try again in a few minutes.";
-  }
-
-  if (rawMessage.includes("PERMISSION_DENIED") || rawMessage.includes("403")) {
-    return "Vertex AI denied the request. Check billing, API status, and project permissions.";
-  }
-
-  return rawMessage;
-}
-
-function shouldRetryAiError(error: unknown) {
-  const rawMessage = error instanceof Error ? error.message : String(error);
-  const normalizedMessage = rawMessage.toLowerCase();
-  const definitiveErrorPatterns = [
-    "400",
-    "401",
-    "403",
-    "404",
-    "billing_disabled",
-    "failed_precondition",
-    "invalid_argument",
-    "permission_denied",
-    "service_disabled",
-    "unauthenticated"
-  ];
-
-  if (definitiveErrorPatterns.some((pattern) => normalizedMessage.includes(pattern))) {
-    return false;
-  }
-
-  return [
-    "408",
-    "429",
-    "500",
-    "502",
-    "503",
-    "504",
-    "ECONNRESET",
-    "ETIMEDOUT",
-    "fetch failed",
-    "rate limit",
-    "RESOURCE_EXHAUSTED",
-    "UNAVAILABLE",
-    "Service Unavailable"
-  ].some((pattern) => normalizedMessage.includes(pattern.toLowerCase()));
-}
+const historyLimit = Number(process.env.GEMINI_HISTORY_LIMIT ?? 40);
 
 function wait(delayMs: number) {
   return new Promise((resolve) => {
@@ -390,7 +211,7 @@ aiRouter.post("/stream", requireAuth, async (request: AuthenticatedRequest, resp
   } catch (error) {
     const status = error instanceof Error && error.name === "ForbiddenError" ? 403 : 500;
     const publicMessage = getAiErrorMessage(error);
-    const userMessage = status >= 500
+    const userMessage = status >= 500 && !isDefinitiveAiError(error)
       ? `Gemini is temporarily unavailable. Please retry in a moment. Reference: ${requestId}`
       : publicMessage;
 

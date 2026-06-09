@@ -4,6 +4,7 @@ import { AlertTriangle, AtSign, Bot, Circle, MessageSquarePlus, Reply, Send, Use
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import { db } from "../lib/firebase";
+import { formatTenantLabel, getMessagePreview, renderMessageContent } from "../lib/messageFormatting";
 
 interface ChatPageProps {
   user: User;
@@ -26,6 +27,12 @@ interface LatestRoomMessage {
   senderId: string;
   createdAtMillis: number;
 }
+
+type ClosingModal = "create-room" | "members" | null;
+
+const MODAL_EXIT_DURATION_MS = 160;
+const PRESENCE_HEARTBEAT_INTERVAL_MS = 8000;
+const PRESENCE_EXPIRATION_MS = 20000;
 
 function getTimestampMillis(value: unknown) {
   if (value instanceof Timestamp) {
@@ -60,48 +67,12 @@ function formatRoleLabel(role?: UserRole) {
   return role === "admin" ? "Admin" : "Member";
 }
 
-function formatTenantLabel(orgId: string) {
-  const labels: Record<string, string> = {
-    acme: "ACME",
-    globex: "GLOBEX"
-  };
-
-  return labels[orgId] ?? orgId;
-}
-
 function parseJsonSafely(text: string) {
   try {
     return JSON.parse(text) as { error?: string; requestId?: string };
   } catch {
     return null;
   }
-}
-
-function getMessagePreview(content: string, maxLength = 120) {
-  const normalizedContent = content.trim().replace(/\s+/g, " ");
-
-  if (normalizedContent.length <= maxLength) {
-    return normalizedContent;
-  }
-
-  return `${normalizedContent.slice(0, maxLength - 1)}…`;
-}
-
-function renderMessageContent(content: string) {
-  const mentionPattern = /(@(?:gemini|ai|ia)\b)/gi;
-  const exactMentionPattern = /^@(?:gemini|ai|ia)$/i;
-
-  return content.split(mentionPattern).map((part, index) => {
-    if (!exactMentionPattern.test(part)) {
-      return part;
-    }
-
-    return (
-      <strong className="font-semibold text-cyan-600" key={`${part}-${index}`}>
-        {part}
-      </strong>
-    );
-  });
 }
 
 export function ChatPage({ user, onSignOut }: ChatPageProps) {
@@ -121,6 +92,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
   const [roomActionError, setRoomActionError] = useState<string | null>(null);
   const [isCreateRoomOpen, setIsCreateRoomOpen] = useState(false);
   const [isMemberManagerOpen, setIsMemberManagerOpen] = useState(false);
+  const [closingModal, setClosingModal] = useState<ClosingModal>(null);
   const [newRoomName, setNewRoomName] = useState("");
   const [newRoomDescription, setNewRoomDescription] = useState("");
   const [newRoomAiPersonaPrompt, setNewRoomAiPersonaPrompt] = useState("");
@@ -129,6 +101,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
   const [activeRoomMemberIds, setActiveRoomMemberIds] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const modalExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingWriteRef = useRef(0);
   const [now, setNow] = useState(Date.now());
   const geminiModel = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash-lite";
@@ -138,6 +111,8 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
     [activeRoomId, rooms]
   );
   const isAdmin = profile?.role === "admin";
+  const isCreateRoomVisible = isCreateRoomOpen || closingModal === "create-room";
+  const isMemberManagerVisible = isMemberManagerOpen || closingModal === "members";
   const sortedOrgUsers = useMemo(
     () => [...orgUsers].sort((firstUser, secondUser) => firstUser.displayName.localeCompare(secondUser.displayName)),
     [orgUsers]
@@ -405,7 +380,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
           displayName: profile?.displayName ?? "Unknown user",
           isOnline,
           lastSeen: serverTimestamp(),
-          expiresAt: Timestamp.fromMillis(Date.now() + 45000)
+          expiresAt: Timestamp.fromMillis(Date.now() + PRESENCE_EXPIRATION_MS)
         },
         { merge: true }
       );
@@ -416,7 +391,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
     void writePresence(true);
     const interval = window.setInterval(() => {
       void writePresence(true);
-    }, 15000);
+    }, PRESENCE_HEARTBEAT_INTERVAL_MS);
 
     return () => {
       window.clearInterval(interval);
@@ -491,6 +466,14 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
     };
   }, [isMemberManagerOpen, isCreateRoomOpen, activeRoom]);
 
+  useEffect(() => {
+    return () => {
+      if (modalExitTimeoutRef.current) {
+        clearTimeout(modalExitTimeoutRef.current);
+      }
+    };
+  }, []);
+
   async function writeTypingState(isTyping: boolean) {
     if (!profile || !activeRoomId) {
       return;
@@ -558,19 +541,35 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
   }
 
   function closeCreateRoomForm() {
+    if (closingModal || !isCreateRoomOpen) {
+      return;
+    }
+
+    setClosingModal("create-room");
     setIsCreateRoomOpen(false);
-    setRoomActionError(null);
-    setNewRoomName("");
-    setNewRoomDescription("");
-    setNewRoomAiPersonaPrompt("");
-    setNewRoomMemberIds([user.uid]);
+    modalExitTimeoutRef.current = setTimeout(() => {
+      setClosingModal(null);
+      setRoomActionError(null);
+      setNewRoomName("");
+      setNewRoomDescription("");
+      setNewRoomAiPersonaPrompt("");
+      setNewRoomMemberIds([user.uid]);
+    }, MODAL_EXIT_DURATION_MS);
   }
 
   function closeMemberManager() {
+    if (closingModal || !isMemberManagerOpen) {
+      return;
+    }
+
+    setClosingModal("members");
     setIsMemberManagerOpen(false);
-    setRoomActionError(null);
-    setActiveRoomAiPersonaPrompt(activeRoom?.aiPersonaPrompt ?? "");
-    setActiveRoomMemberIds(activeRoom?.memberIds ?? []);
+    modalExitTimeoutRef.current = setTimeout(() => {
+      setClosingModal(null);
+      setRoomActionError(null);
+      setActiveRoomAiPersonaPrompt(activeRoom?.aiPersonaPrompt ?? "");
+      setActiveRoomMemberIds(activeRoom?.memberIds ?? []);
+    }, MODAL_EXIT_DURATION_MS);
   }
 
   async function createRoom(event: FormEvent<HTMLFormElement>) {
@@ -614,11 +613,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
       }
 
       await batch.commit();
-      setNewRoomName("");
-      setNewRoomDescription("");
-      setNewRoomAiPersonaPrompt("");
-      setNewRoomMemberIds([user.uid]);
-      setIsCreateRoomOpen(false);
+      closeCreateRoomForm();
       setActiveRoomId(roomRef.id);
     } catch (error) {
       setRoomActionError(error instanceof Error ? error.message : "Could not create room.");
@@ -658,7 +653,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
       }
 
       await batch.commit();
-      setIsMemberManagerOpen(false);
+      closeMemberManager();
     } catch (error) {
       setRoomActionError(error instanceof Error ? error.message : "Could not update room members.");
     }
@@ -696,14 +691,6 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
     } finally {
       setAiPending(false);
     }
-  }
-
-  async function retryAiResponse() {
-    if (!profile || !activeRoomId || aiPending) {
-      return;
-    }
-
-    await requestAiResponse(profile.orgId, activeRoomId);
   }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -895,12 +882,12 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
             <div
               aria-label={aiError ? "Gemini unavailable" : aiPending ? "Gemini is generating" : "Gemini available"}
               className={[
-                "hidden h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium transition sm:flex",
+                "hidden h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium cursor-default select-none sm:flex",
                 aiError
                   ? "border-rose-200 bg-rose-50 text-rose-700"
                   : aiPending
                     ? "border-cyan-200 bg-cyan-50 text-cyan-700"
-                    : "border-slate-200 bg-white text-slate-600"
+                    : "border-transparent bg-slate-100 text-slate-600"
               ].join(" ")}
               title={aiError ? "Gemini API is currently unavailable" : `Model: ${geminiModel}`}
             >
@@ -924,21 +911,16 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                 <p className="mt-0.5 text-rose-700">{aiError}</p>
               </div>
             </div>
-            <button
-              className="rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={aiPending || !activeRoomId}
-              onClick={retryAiResponse}
-              type="button"
-            >
-              Retry Gemini
-            </button>
           </div>
         ) : null}
-        {isAdmin && isCreateRoomOpen ? (
+        {isAdmin && isCreateRoomVisible ? (
           <div
             aria-labelledby="create-room-modal-title"
             aria-modal="true"
-            className="modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-900/45 px-4 py-6 backdrop-blur-sm"
+            className={[
+              "modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-900/45 px-4 py-6 backdrop-blur-sm",
+              closingModal === "create-room" ? "modal-overlay-out" : ""
+            ].join(" ")}
             role="dialog"
           >
             <button
@@ -948,7 +930,10 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
               type="button"
             />
             <form
-              className="modal-panel relative flex max-h-[min(680px,calc(100vh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
+              className={[
+                "modal-panel relative flex max-h-[min(680px,calc(100vh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20",
+                closingModal === "create-room" ? "modal-panel-out" : ""
+              ].join(" ")}
               onSubmit={createRoom}
             >
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
@@ -1050,11 +1035,14 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
             </form>
           </div>
         ) : null}
-        {isAdmin && activeRoom && isMemberManagerOpen ? (
+        {isAdmin && activeRoom && isMemberManagerVisible ? (
           <div
             aria-labelledby="members-modal-title"
             aria-modal="true"
-            className="modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-900/45 px-4 py-6 backdrop-blur-sm"
+            className={[
+              "modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-900/45 px-4 py-6 backdrop-blur-sm",
+              closingModal === "members" ? "modal-overlay-out" : ""
+            ].join(" ")}
             role="dialog"
           >
             <button
@@ -1063,7 +1051,12 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
               onClick={closeMemberManager}
               type="button"
             />
-            <div className="modal-panel relative flex max-h-[min(680px,calc(100vh-3rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20">
+            <div
+              className={[
+                "modal-panel relative flex max-h-[min(680px,calc(100vh-3rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20",
+                closingModal === "members" ? "modal-panel-out" : ""
+              ].join(" ")}
+            >
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Admin controls</p>
@@ -1150,7 +1143,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                 </div>
                 <h2 className="text-lg font-semibold text-slate-900">No messages yet</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Start the room conversation. Mention @Gemini, @AI, or @IA when the team needs an AI response.
+                  Start the room conversation. Mention @Gemini or @AI when the team needs an AI response.
                 </p>
               </div>
             </div>
@@ -1164,7 +1157,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                 return (
                   <article
                     className={[
-                      "rounded-lg border p-4 shadow-sm",
+                      "relative rounded-lg border p-4 pb-12 shadow-sm",
                       message.type === "ai"
                         ? message.status === "error"
                           ? "border-red-200 bg-red-50"
@@ -1190,17 +1183,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                           Failed
                         </span>
                       ) : null}
-                      {message.status !== "streaming" ? (
-                        <button
-                          aria-label={`Reply to ${message.senderName}`}
-                          className="ml-auto grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-cyan-700"
-                          onClick={() => setReplyingTo(message)}
-                          title={`Reply to ${message.senderName}`}
-                          type="button"
-                        >
-                          <Reply size={15} />
-                        </button>
-                      ) : null}
+
                     </div>
                     <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
                       {message.content
@@ -1212,16 +1195,6 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                         <span className="ml-1 inline-block h-4 w-1 animate-pulse rounded-full bg-cyan-500 align-[-2px]" />
                       ) : null}
                     </p>
-                    {message.type === "ai" && message.status === "error" ? (
-                      <button
-                        className="mt-3 rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={aiPending || !activeRoomId}
-                        onClick={retryAiResponse}
-                        type="button"
-                      >
-                        Retry Gemini
-                      </button>
-                    ) : null}
                     {replies.length > 0 ? (
                       <div className="mt-4 grid gap-3 border-l-2 border-cyan-100 pl-4">
                         {replies.map((reply) => {
@@ -1229,7 +1202,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                             reply.senderRole ?? orgUsers.find((orgUser) => orgUser.uid === reply.senderId)?.role;
 
                           return (
-                            <article className="rounded-lg border border-slate-200 bg-white/80 p-3 shadow-sm" key={reply.id}>
+                            <article className="relative rounded-lg border border-slate-200 bg-white/80 p-3 pb-12 shadow-sm" key={reply.id}>
                               <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
                                 <strong className="text-slate-900">{reply.senderName}</strong>
                                 <span className="text-xs text-slate-400">{formatMessageTime(reply.createdAt)}</span>
@@ -1239,17 +1212,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                                 <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-700">
                                   Thread reply
                                 </span>
-                                {reply.status !== "streaming" ? (
-                                  <button
-                                    aria-label={`Reply to ${reply.senderName}`}
-                                    className="ml-auto grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-cyan-700"
-                                    onClick={() => setReplyingTo(reply)}
-                                    title={`Reply to ${reply.senderName}`}
-                                    type="button"
-                                  >
-                                    <Reply size={15} />
-                                  </button>
-                                ) : null}
+
                               </div>
                               <p className="mb-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
                                 Replying to {reply.parentSenderName ?? message.senderName}: “{reply.parentMessagePreview ?? getMessagePreview(message.content)}”
@@ -1264,10 +1227,32 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
                                   <span className="ml-1 inline-block h-4 w-1 animate-pulse rounded-full bg-cyan-500 align-[-2px]" />
                                 ) : null}
                               </p>
+                              {reply.status !== "streaming" && reply.status !== "error" ? (
+                                <button
+                                  aria-label={`Reply to ${reply.senderName}`}
+                                  className="absolute bottom-3 right-3 grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-cyan-700"
+                                  onClick={() => setReplyingTo(reply)}
+                                  title={`Reply to ${reply.senderName}`}
+                                  type="button"
+                                >
+                                  <Reply size={15} />
+                                </button>
+                              ) : null}
                             </article>
                           );
                         })}
                       </div>
+                    ) : null}
+                    {message.status !== "streaming" && message.status !== "error" ? (
+                      <button
+                        aria-label={`Reply to ${message.senderName}`}
+                        className="absolute bottom-3 right-3 grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-cyan-700"
+                        onClick={() => setReplyingTo(message)}
+                        title={`Reply to ${message.senderName}`}
+                        type="button"
+                      >
+                        <Reply size={15} />
+                      </button>
                     ) : null}
                   </article>
                 );

@@ -20,12 +20,29 @@ button {
   animation: modal-panel-in 180ms ease-out;
 }
 
+.modal-overlay-out {
+  animation: modal-overlay-out 160ms ease-in forwards;
+}
+
+.modal-panel-out {
+  animation: modal-panel-out 160ms ease-in forwards;
+}
+
 @keyframes modal-overlay-in {
   from {
     opacity: 0;
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes modal-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 
@@ -37,5 +54,25 @@ button {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes modal-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal-panel,
+  .modal-overlay-out,
+  .modal-panel-out {
+    animation-duration: 1ms;
   }
 }
