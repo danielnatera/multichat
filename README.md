@@ -15,23 +15,23 @@ Multi-tenant collaborative AI chat platform built with React, Vite, TypeScript, 
 
 There is no signup flow. The app is evaluated with seeded Firebase Auth users.
 
-All seeded users use this password:
-
-```text
-Test1234!
-```
+All seeded users use this password: Test1234!
 
 ACME:
 
 - `sarah@acme.test` - admin
 - `mike@acme.test` - member
 - `lisa@acme.test` - member
+- `james@acme.test` - member
+- `olivia@acme.test` - member
 
 GLOBEX:
 
 - `ana@globex.test` - admin
 - `diego@globex.test` - member
 - `carla@globex.test` - member
+- `marco@globex.test` - member
+- `nina@globex.test` - member
 
 ## Features
 
@@ -307,7 +307,7 @@ npm.cmd run seed --workspace @multichat/api
 The seed creates:
 
 - 2 organizations: `acme`, `globex`.
-- 3 users per organization.
+- 5 users per organization.
 - Initial rooms, memberships, and sample messages.
 
 ## AI Flow
@@ -423,4 +423,6 @@ Invoke-WebRequest -UseBasicParsing "https://multichat-api-436954625005.us-centra
 
 - Firestore-based presence uses heartbeat + expiration because Firestore does not provide browser `onDisconnect`.
 - Frontend chunks are split into `firebase`, `react`, `vendor`, and app bundles.
+- `npm audit` may report moderate advisories from transitive Google Cloud packages used by Firebase Admin.
+app bundles.
 - `npm audit` may report moderate advisories from transitive Google Cloud packages used by Firebase Admin.

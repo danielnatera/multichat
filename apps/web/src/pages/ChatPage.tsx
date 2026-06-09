@@ -283,11 +283,16 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
   }, [user.uid]);
 
   useEffect(() => {
-    setActiveRoomMemberIds(activeRoom?.memberIds ?? []);
-    setActiveRoomAiPersonaPrompt(activeRoom?.aiPersonaPrompt ?? "");
     setReplyingTo(null);
     setIsMemberManagerOpen(false);
-  }, [activeRoom]);
+  }, [activeRoomId]);
+
+  useEffect(() => {
+    if (!isMemberManagerOpen && !closingModal) {
+      setActiveRoomMemberIds(activeRoom?.memberIds ?? []);
+      setActiveRoomAiPersonaPrompt(activeRoom?.aiPersonaPrompt ?? "");
+    }
+  }, [activeRoom, isMemberManagerOpen, closingModal]);
 
   useEffect(() => {
     if (!profile || !activeRoomId) {
