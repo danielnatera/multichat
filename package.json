@@ -1,0 +1,22 @@
+{
+  "name": "multichat",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @multichat/web",
+    "dev:api": "npm run dev --workspace @multichat/api",
+    "build": "npm run build --workspaces",
+    "build:api": "npm run build --workspace @multichat/shared && npm run build --workspace @multichat/api",
+    "start:api": "npm run start --workspace @multichat/api",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

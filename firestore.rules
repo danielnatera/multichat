@@ -1,0 +1,70 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function orgUser(orgId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/users/$(request.auth.uid));
+    }
+
+    function roomMember(orgId, roomId) {
+      return orgUser(orgId)
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/rooms/$(roomId)/members/$(request.auth.uid));
+    }
+
+    match /userProfiles/{userId} {
+      allow read: if signedIn() && userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /organizations/{orgId} {
+      allow read: if orgUser(orgId);
+      allow write: if false;
+
+      match /users/{userId} {
+        allow read: if orgUser(orgId);
+        allow write: if false;
+      }
+
+      match /rooms/{roomId} {
+        allow read: if orgUser(orgId) && request.auth.uid in resource.data.memberIds;
+        allow create, update, delete: if orgUser(orgId)
+          && get(/databases/$(database)/documents/organizations/$(orgId)/users/$(request.auth.uid)).data.role == "admin";
+
+        match /members/{userId} {
+          allow read: if roomMember(orgId, roomId);
+          allow write: if orgUser(orgId)
+            && get(/databases/$(database)/documents/organizations/$(orgId)/users/$(request.auth.uid)).data.role == "admin";
+        }
+
+        match /messages/{messageId} {
+          allow read: if roomMember(orgId, roomId);
+          allow create: if roomMember(orgId, roomId)
+            && request.resource.data.senderId == request.auth.uid
+            && request.resource.data.orgId == orgId
+            && request.resource.data.roomId == roomId;
+          allow update, delete: if false;
+        }
+
+        match /presence/{userId} {
+          allow read: if roomMember(orgId, roomId);
+          allow write: if roomMember(orgId, roomId) && userId == request.auth.uid;
+        }
+
+        match /typing/{userId} {
+          allow read: if roomMember(orgId, roomId);
+          allow write: if roomMember(orgId, roomId) && userId == request.auth.uid;
+        }
+
+        match /readStates/{userId} {
+          allow read: if roomMember(orgId, roomId) && userId == request.auth.uid;
+          allow write: if roomMember(orgId, roomId) && userId == request.auth.uid;
+        }
+      }
+    }
+  }
+}
