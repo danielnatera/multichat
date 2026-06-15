@@ -163,3 +163,16 @@ export async function streamGeminiResponse(prompt: string) {
   // Keep the public contract the same for mock and real Vertex streams.
   return { stream: streamVertexRestResponse(prompt) };
 }
+
+export async function generateGeminiText(prompt: string) {
+  const response = await streamGeminiResponse(prompt);
+  let content = "";
+
+  for await (const chunk of response.stream as AsyncIterable<{
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  }>) {
+    content += chunk.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
+  }
+
+  return content.trim();
+}

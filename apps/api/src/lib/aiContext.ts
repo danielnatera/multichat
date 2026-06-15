@@ -13,6 +13,7 @@ export interface RoomData {
   name?: string;
   description?: string;
   aiPersonaPrompt?: string;
+  memberIds?: string[];
 }
 
 interface GeminiContextOptions {

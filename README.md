@@ -47,6 +47,7 @@ GLOBEX:
 - Lightweight message threading with inline replies.
 - Gemini responds when explicitly mentioned with `@Gemini`, `@AI`, or `@IA`.
 - Gemini responses stream to Firestore in chunks so all room members see updates.
+- Gemini can request controlled backend tools through a typed tool registry.
 - Backend validates Firebase ID tokens, organization access, and room membership before calling Gemini.
 - Backend retries transient Gemini failures with exponential backoff.
 - Definitive Gemini failures are logged and shown as clear error states.
@@ -224,6 +225,26 @@ Gemini receives a bounded room context:
 - Empty, failed, streaming, and system messages are excluded.
 
 This keeps long conversations manageable without scanning the full room history.
+
+## AI Tools
+
+The backend exposes a small controlled tool registry in `apps/api/src/tools`.
+
+Current tools:
+
+- `get_room_members`: returns current room members with names, emails, and roles.
+- `get_recent_messages`: returns recent useful room messages with sender attribution.
+- `get_online_users`: returns users currently online in the active room.
+
+Developers add tools by creating a `.tool.ts` module with:
+
+- `name`
+- `description`
+- `parameters`
+- `parametersDescription`
+- `execute`
+
+The tools prompt is generated from registry metadata, so developers do not manually hardcode tool descriptions into the Gemini prompt. Gemini can request a tool, but the backend validates the tool name and arguments before executing anything.
 
 ## Error Handling
 

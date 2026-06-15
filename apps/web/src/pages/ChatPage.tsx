@@ -1,10 +1,15 @@
-import type { ChatMessage, OrgUser, Room, UserRole } from "@multichat/shared";
+import type { ChatMessage, OrgUser, Room } from "@multichat/shared";
 import { addDoc, collection, doc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, Timestamp, where, writeBatch } from "firebase/firestore";
-import { AlertTriangle, AtSign, Bot, Circle, MessageSquarePlus, Reply, Send, Users, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import { db } from "../lib/firebase";
-import { formatTenantLabel, getMessagePreview, renderMessageContent } from "../lib/messageFormatting";
+import { getMessagePreview } from "../lib/messageFormatting";
+import { ChatHeader } from "../components/chat/ChatHeader";
+import { ChatSidebar } from "../components/chat/ChatSidebar";
+import { MessageComposer } from "../components/chat/MessageComposer";
+import { MessageList } from "../components/chat/MessageList";
+import { CreateRoomModal } from "../components/chat/CreateRoomModal";
+import { MembersModal } from "../components/chat/MembersModal";
 
 interface ChatPageProps {
   user: User;
@@ -61,10 +66,6 @@ function formatMessageTime(createdAt: unknown) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(timestampMillis));
-}
-
-function formatRoleLabel(role?: UserRole) {
-  return role === "admin" ? "Admin" : "Member";
 }
 
 function parseJsonSafely(text: string) {
@@ -562,7 +563,7 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
     }, MODAL_EXIT_DURATION_MS);
   }
 
-  function closeMemberManager() {
+  function closeMemberManager({ resetDraft = true } = {}) {
     if (closingModal || !isMemberManagerOpen) {
       return;
     }
@@ -572,8 +573,10 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
     modalExitTimeoutRef.current = setTimeout(() => {
       setClosingModal(null);
       setRoomActionError(null);
-      setActiveRoomAiPersonaPrompt(activeRoom?.aiPersonaPrompt ?? "");
-      setActiveRoomMemberIds(activeRoom?.memberIds ?? []);
+      if (resetDraft) {
+        setActiveRoomAiPersonaPrompt(activeRoom?.aiPersonaPrompt ?? "");
+        setActiveRoomMemberIds(activeRoom?.memberIds ?? []);
+      }
     }, MODAL_EXIT_DURATION_MS);
   }
 
@@ -658,7 +661,18 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
       }
 
       await batch.commit();
-      closeMemberManager();
+      setRooms((currentRooms) =>
+        currentRooms.map((room) =>
+          room.id === activeRoom.id
+            ? {
+                ...room,
+                aiPersonaPrompt: activeRoomAiPersonaPrompt.trim(),
+                memberIds
+              }
+            : room
+        )
+      );
+      closeMemberManager({ resetDraft: false });
     } catch (error) {
       setRoomActionError(error instanceof Error ? error.message : "Could not update room members.");
     }
@@ -759,558 +773,83 @@ export function ChatPage({ user, onSignOut }: ChatPageProps) {
   return (
     <main className="flex h-screen overflow-hidden bg-slate-100 p-3 text-slate-900 sm:p-4">
       <div className="grid h-full min-h-0 w-full grid-rows-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/40 md:grid-rows-none md:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="flex min-h-0 flex-col border-b border-slate-200 bg-white md:border-b-0 md:border-r">
-        <div className="flex h-16 items-center border-b border-slate-200 px-5">
-          <div>
-            <p className="text-sm font-semibold text-slate-900">TeamChat AI</p>
-            <p className="text-xs font-semibold tracking-wide text-slate-500">{formatTenantLabel(profile.orgId)}</p>
-          </div>
-        </div>
-        <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-4">
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Rooms</p>
-            </div>
-            <nav className="grid gap-1">
-              {rooms.map((room) => {
-                const hasUnreadMessages = unreadRoomIds.has(room.id);
-
-                return (
-                  <button
-                    className={[
-                      "flex items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm transition",
-                      room.id === activeRoomId
-                        ? "bg-slate-800 text-white shadow-sm"
-                        : hasUnreadMessages
-                          ? "bg-cyan-50 text-slate-900 ring-1 ring-cyan-100 hover:bg-cyan-100"
-                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                    ].join(" ")}
-                    key={room.id}
-                    onClick={() => setActiveRoomId(room.id)}
-                    type="button"
-                  >
-                    <span className="min-w-0 truncate"># {room.name}</span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {hasUnreadMessages ? (
-                        <span className="rounded-full bg-cyan-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-                          New
-                        </span>
-                      ) : null}
-                      <span className={room.id === activeRoomId ? "text-slate-300" : "text-slate-400"}>
-                        {room.memberIds?.length ?? 0}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-              {isAdmin ? (
-                <button
-                  className="mt-2 flex items-center justify-center gap-2 rounded-md border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-500 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700"
-                  onClick={() => {
-                    setRoomActionError(null);
-                    setIsCreateRoomOpen(true);
-                  }}
-                  type="button"
-                >
-                  <MessageSquarePlus size={16} />
-                  New room
-                </button>
-              ) : null}
-            </nav>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <Users size={15} />
-              Online ({visiblePresenceUsers.length})
-            </p>
-            <div className="grid gap-2 text-sm text-slate-600">
-              {visiblePresenceUsers.length === 0 ? (
-                <span className="text-slate-400">No one online</span>
-              ) : (
-                visiblePresenceUsers.map((presenceUser) => (
-                  <span className="flex items-center gap-2" key={presenceUser.uid}>
-                    <Circle className="fill-emerald-500 text-emerald-500" size={9} />
-                    {presenceUser.displayName}
-                  </span>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex-none border-t border-slate-700 bg-slate-800 px-4 py-3 text-white">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{profile.displayName}</p>
-              <p className="text-xs text-slate-300">
-                {formatRoleLabel(profile.role)} · {formatTenantLabel(profile.orgId)}
-              </p>
-            </div>
-            <button
-              className="shrink-0 rounded-md bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20"
-              onClick={onSignOut}
-              type="button"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-        </aside>
+        <ChatSidebar
+          activeRoomId={activeRoomId}
+          isAdmin={isAdmin}
+          onCreateRoom={() => {
+            setRoomActionError(null);
+            setIsCreateRoomOpen(true);
+          }}
+          onSelectRoom={setActiveRoomId}
+          onSignOut={onSignOut}
+          profile={profile}
+          rooms={rooms}
+          unreadRoomIds={unreadRoomIds}
+          visiblePresenceUsers={visiblePresenceUsers}
+        />
         <section className="flex h-full min-h-0 min-w-0 flex-col bg-slate-50">
-        <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-5">
-          <div>
-            <h1 className="text-base font-semibold text-slate-900">
-              {activeRoom ? `# ${activeRoom.name}` : "No room selected"}
-            </h1>
-            <p className="text-sm text-slate-500">
-              {activeRoom?.description || "No room description"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {isAdmin && activeRoom ? (
-              <button
-                className={[
-                  "hidden h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium transition sm:flex",
-                  isMemberManagerOpen
-                    ? "border-slate-800 bg-slate-800 text-white"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                ].join(" ")}
-                onClick={() => {
-                  setRoomActionError(null);
-                  setIsMemberManagerOpen((current) => !current);
-                }}
-                type="button"
-              >
-                <Users size={15} />
-                Members
-              </button>
-            ) : null}
-            <div
-              aria-label={aiError ? "Gemini unavailable" : aiPending ? "Gemini is generating" : "Gemini available"}
-              className={[
-                "hidden h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium cursor-default select-none sm:flex",
-                aiError
-                  ? "border-rose-200 bg-rose-50 text-rose-700"
-                  : aiPending
-                    ? "border-cyan-200 bg-cyan-50 text-cyan-700"
-                    : "border-transparent bg-slate-100 text-slate-600"
-              ].join(" ")}
-              title={aiError ? "Gemini API is currently unavailable" : `Model: ${geminiModel}`}
-            >
-              {aiPending ? (
-                <span className="size-3 animate-spin rounded-full border-2 border-cyan-200 border-t-cyan-700" />
-              ) : (
-                <Bot size={15} />
-              )}
-              Gemini
-            </div>
-          </div>
-        </header>
-        {aiError ? (
-          <div className="flex flex-none flex-wrap items-center justify-between gap-3 border-b border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-800">
-            <div className="flex min-w-0 items-start gap-3">
-              <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-700">
-                <AlertTriangle size={15} />
-              </span>
-              <div className="min-w-0">
-                <p className="font-semibold">Gemini is unavailable right now</p>
-                <p className="mt-0.5 text-rose-700">{aiError}</p>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        <ChatHeader
+          activeRoom={activeRoom}
+          aiError={aiError}
+          aiPending={aiPending}
+          geminiModel={geminiModel}
+          isAdmin={isAdmin}
+          isMemberManagerOpen={isMemberManagerOpen}
+          onToggleMembers={() => {
+            setRoomActionError(null);
+            setIsMemberManagerOpen((current) => !current);
+          }}
+        />
         {isAdmin && isCreateRoomVisible ? (
-          <div
-            aria-labelledby="create-room-modal-title"
-            aria-modal="true"
-            className={[
-              "modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-900/45 px-4 py-6 backdrop-blur-sm",
-              closingModal === "create-room" ? "modal-overlay-out" : ""
-            ].join(" ")}
-            role="dialog"
-          >
-            <button
-              aria-label="Close create room"
-              className="absolute inset-0 cursor-default"
-              onClick={closeCreateRoomForm}
-              type="button"
-            />
-            <form
-              className={[
-                "modal-panel relative flex max-h-[min(680px,calc(100vh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20",
-                closingModal === "create-room" ? "modal-panel-out" : ""
-              ].join(" ")}
-              onSubmit={createRoom}
-            >
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Admin controls</p>
-                  <h2 className="mt-1 text-lg font-semibold text-slate-900" id="create-room-modal-title">
-                    Create new room
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Set the room details and choose who can access the conversation.
-                  </p>
-                </div>
-                <button
-                  aria-label="Close create room"
-                  className="grid size-9 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-                  onClick={closeCreateRoomForm}
-                  type="button"
-                >
-                  <X size={17} />
-                </button>
-              </div>
-              <div className="min-h-0 overflow-y-auto bg-slate-50 px-5 py-4">
-                <div className="grid min-w-0 gap-3">
-                  <label className="grid min-w-0 gap-1.5 text-sm font-medium text-slate-700">
-                    Room name
-                    <input
-                      className="h-10 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm font-normal outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-                      onChange={(event) => setNewRoomName(event.target.value)}
-                      placeholder="engineering"
-                      value={newRoomName}
-                    />
-                  </label>
-                  <label className="grid min-w-0 gap-1.5 text-sm font-medium text-slate-700">
-                    Description
-                    <input
-                      className="h-10 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm font-normal outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-                      onChange={(event) => setNewRoomDescription(event.target.value)}
-                      placeholder="Optional context"
-                      value={newRoomDescription}
-                    />
-                  </label>
-                  <label className="grid min-w-0 gap-1.5 text-sm font-medium text-slate-700">
-                    AI persona prompt
-                    <textarea
-                      className="min-h-24 w-full min-w-0 resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal leading-6 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-                      maxLength={800}
-                      onChange={(event) => setNewRoomAiPersonaPrompt(event.target.value)}
-                      placeholder="Optional. Example: Act as a concise senior backend architect. Prefer tradeoffs, risks, and next steps."
-                      value={newRoomAiPersonaPrompt}
-                    />
-                    <span className="text-xs font-normal text-slate-400">
-                      Optional instructions that shape Gemini's tone and behavior in this room.
-                    </span>
-                  </label>
-                </div>
-                <div className="mt-4">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Members</p>
-                  <div className="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                    {sortedOrgUsers.map((orgUser) => (
-                      <label
-                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50/40"
-                        key={orgUser.uid}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-slate-800">{orgUser.displayName}</span>
-                          <span className="block truncate text-xs text-slate-400">{formatRoleLabel(orgUser.role)}</span>
-                        </span>
-                        <input
-                          checked={newRoomMemberIds.includes(orgUser.uid)}
-                          className="size-4 shrink-0 rounded border-slate-300 text-cyan-600"
-                          disabled={orgUser.uid === user.uid}
-                          onChange={() => toggleNewRoomMember(orgUser.uid)}
-                          type="checkbox"
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                {roomActionError ? (
-                  <p className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{roomActionError}</p>
-                ) : null}
-              </div>
-              <div className="flex flex-none flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:justify-end">
-                <button
-                  className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
-                  onClick={closeCreateRoomForm}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="h-10 rounded-md bg-slate-800 px-4 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-                  disabled={!newRoomName.trim()}
-                  type="submit"
-                >
-                  Create room
-                </button>
-              </div>
-            </form>
-          </div>
+          <CreateRoomModal
+            currentUserId={user.uid}
+            description={newRoomDescription}
+            isClosing={closingModal === "create-room"}
+            memberIds={newRoomMemberIds}
+            name={newRoomName}
+            onClose={closeCreateRoomForm}
+            onDescriptionChange={setNewRoomDescription}
+            onMemberToggle={toggleNewRoomMember}
+            onNameChange={setNewRoomName}
+            onPersonaPromptChange={setNewRoomAiPersonaPrompt}
+            onSubmit={createRoom}
+            personaPrompt={newRoomAiPersonaPrompt}
+            roomActionError={roomActionError}
+            sortedOrgUsers={sortedOrgUsers}
+          />
         ) : null}
         {isAdmin && activeRoom && isMemberManagerVisible ? (
-          <div
-            aria-labelledby="members-modal-title"
-            aria-modal="true"
-            className={[
-              "modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-900/45 px-4 py-6 backdrop-blur-sm",
-              closingModal === "members" ? "modal-overlay-out" : ""
-            ].join(" ")}
-            role="dialog"
-          >
-            <button
-              aria-label="Close member manager"
-              className="absolute inset-0 cursor-default"
-              onClick={closeMemberManager}
-              type="button"
-            />
-            <div
-              className={[
-                "modal-panel relative flex max-h-[min(680px,calc(100vh-3rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20",
-                closingModal === "members" ? "modal-panel-out" : ""
-              ].join(" ")}
-            >
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Admin controls</p>
-                  <h2 className="mt-1 truncate text-lg font-semibold text-slate-900" id="members-modal-title">
-                    Manage # {activeRoom.name} members
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Configure access and the Gemini personality for this room.
-                  </p>
-                </div>
-                <button
-                  aria-label="Close member manager"
-                  className="grid size-9 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-                  onClick={closeMemberManager}
-                  type="button"
-                >
-                  <X size={17} />
-                </button>
-              </div>
-              <div className="min-h-0 overflow-y-auto bg-slate-50 px-5 py-4">
-                <label className="mb-4 grid min-w-0 gap-1.5 text-sm font-medium text-slate-700">
-                  AI persona prompt
-                  <textarea
-                    className="min-h-24 w-full min-w-0 resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal leading-6 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-                    maxLength={800}
-                    onChange={(event) => setActiveRoomAiPersonaPrompt(event.target.value)}
-                    placeholder="Optional. Example: Act as a concise senior backend architect. Prefer tradeoffs, risks, and next steps."
-                    value={activeRoomAiPersonaPrompt}
-                  />
-                  <span className="text-xs font-normal text-slate-400">
-                    Gemini uses this instruction only inside this room.
-                  </span>
-                </label>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Members</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {sortedOrgUsers.map((orgUser) => (
-                    <label
-                      className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50/40"
-                      key={orgUser.uid}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium text-slate-800">{orgUser.displayName}</span>
-                        <span className="block truncate text-xs text-slate-400">{orgUser.email}</span>
-                      </span>
-                      <input
-                        checked={activeRoomMemberIds.includes(orgUser.uid)}
-                        className="size-4 shrink-0 rounded border-slate-300 text-cyan-600"
-                        disabled={orgUser.uid === user.uid}
-                        onChange={() => toggleActiveRoomMember(orgUser.uid)}
-                        type="checkbox"
-                      />
-                    </label>
-                  ))}
-                </div>
-                {roomActionError ? (
-                  <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{roomActionError}</p>
-                ) : null}
-              </div>
-              <div className="flex flex-none flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:justify-end">
-                <button
-                  className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
-                  onClick={closeMemberManager}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="h-10 rounded-md bg-slate-800 px-4 text-sm font-medium text-white transition hover:bg-slate-700"
-                  onClick={saveActiveRoomMembers}
-                  type="button"
-                >
-                  Save changes
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-5 py-6">
-          {messages.length === 0 ? (
-            <div className="grid h-full place-items-center">
-              <div className="max-w-sm text-center">
-                <div className="mx-auto mb-4 grid size-12 place-items-center rounded-lg bg-white text-slate-500 shadow-sm">
-                  <Bot size={22} />
-                </div>
-                <h2 className="text-lg font-semibold text-slate-900">No messages yet</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Start the room conversation. Mention @Gemini or @AI when the team needs an AI response.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="mx-auto flex max-w-4xl flex-col gap-4">
-              {topLevelMessages.map((message) => {
-                const senderRole =
-                  message.senderRole ?? orgUsers.find((orgUser) => orgUser.uid === message.senderId)?.role;
-                const replies = repliesByParentId.get(message.id) ?? [];
-
-                return (
-                  <article
-                    className={[
-                      "relative rounded-lg border p-4 pb-12 shadow-sm",
-                      message.type === "ai"
-                        ? message.status === "error"
-                          ? "border-red-200 bg-red-50"
-                          : "border-cyan-200 bg-cyan-50"
-                        : "border-slate-200 bg-white"
-                    ].join(" ")}
-                    key={message.id}
-                  >
-                    <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
-                      <strong className="text-slate-900">{message.senderName}</strong>
-                      <span className="text-xs text-slate-400">{formatMessageTime(message.createdAt)}</span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-                        {message.type === "ai" ? "Gemini" : formatRoleLabel(senderRole)}
-                      </span>
-                      {message.status === "streaming" ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-medium text-cyan-700">
-                          <span className="size-1.5 animate-pulse rounded-full bg-cyan-600" />
-                          Streaming
-                        </span>
-                      ) : null}
-                      {message.status === "error" ? (
-                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                          Failed
-                        </span>
-                      ) : null}
-
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                      {message.content
-                        ? renderMessageContent(message.content)
-                        : message.status === "streaming"
-                          ? "Gemini is reading the room..."
-                          : ""}
-                      {message.status === "streaming" ? (
-                        <span className="ml-1 inline-block h-4 w-1 animate-pulse rounded-full bg-cyan-500 align-[-2px]" />
-                      ) : null}
-                    </p>
-                    {replies.length > 0 ? (
-                      <div className="mt-4 grid gap-3 border-l-2 border-cyan-100 pl-4">
-                        {replies.map((reply) => {
-                          const replySenderRole =
-                            reply.senderRole ?? orgUsers.find((orgUser) => orgUser.uid === reply.senderId)?.role;
-
-                          return (
-                            <article className="relative rounded-lg border border-slate-200 bg-white/80 p-3 pb-12 shadow-sm" key={reply.id}>
-                              <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
-                                <strong className="text-slate-900">{reply.senderName}</strong>
-                                <span className="text-xs text-slate-400">{formatMessageTime(reply.createdAt)}</span>
-                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-                                  {reply.type === "ai" ? "Gemini" : formatRoleLabel(replySenderRole)}
-                                </span>
-                                <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-700">
-                                  Thread reply
-                                </span>
-
-                              </div>
-                              <p className="mb-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                                Replying to {reply.parentSenderName ?? message.senderName}: “{reply.parentMessagePreview ?? getMessagePreview(message.content)}”
-                              </p>
-                              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                                {reply.content
-                                  ? renderMessageContent(reply.content)
-                                  : reply.status === "streaming"
-                                    ? "Gemini is reading the thread..."
-                                    : ""}
-                                {reply.status === "streaming" ? (
-                                  <span className="ml-1 inline-block h-4 w-1 animate-pulse rounded-full bg-cyan-500 align-[-2px]" />
-                                ) : null}
-                              </p>
-                              {reply.status !== "streaming" && reply.status !== "error" ? (
-                                <button
-                                  aria-label={`Reply to ${reply.senderName}`}
-                                  className="absolute bottom-3 right-3 grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-cyan-700"
-                                  onClick={() => setReplyingTo(reply)}
-                                  title={`Reply to ${reply.senderName}`}
-                                  type="button"
-                                >
-                                  <Reply size={15} />
-                                </button>
-                              ) : null}
-                            </article>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                    {message.status !== "streaming" && message.status !== "error" ? (
-                      <button
-                        aria-label={`Reply to ${message.senderName}`}
-                        className="absolute bottom-3 right-3 grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-cyan-700"
-                        onClick={() => setReplyingTo(message)}
-                        title={`Reply to ${message.senderName}`}
-                        type="button"
-                      >
-                        <Reply size={15} />
-                      </button>
-                    ) : null}
-                  </article>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-        {typingLabel ? (
-          <div className="flex-none border-t border-slate-200 bg-white px-5 py-2 text-sm italic text-slate-500">
-            {typingLabel}
-          </div>
-        ) : null}
-        {replyingTo ? (
-          <div className="flex flex-none items-start justify-between gap-3 border-t border-cyan-100 bg-cyan-50 px-5 py-3 text-sm">
-            <div className="min-w-0">
-              <p className="font-semibold text-cyan-800">Replying to {replyingTo.senderName}</p>
-              <p className="mt-0.5 truncate text-cyan-700">{getMessagePreview(replyingTo.content || "Message")}</p>
-            </div>
-            <button
-              aria-label="Cancel reply"
-              className="grid size-8 shrink-0 place-items-center rounded-full text-cyan-700 transition hover:bg-cyan-100"
-              onClick={() => setReplyingTo(null)}
-              type="button"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        ) : null}
-        <form className="grid flex-none grid-cols-[1fr_auto_auto] gap-2 border-t border-slate-200 bg-white p-4" onSubmit={sendMessage}>
-          <input
-            className="h-11 min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-            onChange={(event) => handleDraftChange(event.target.value)}
-            placeholder="Type a message or mention @Gemini..."
-            value={draft}
+          <MembersModal
+            activeRoom={activeRoom}
+            currentUserId={user.uid}
+            isClosing={closingModal === "members"}
+            memberIds={activeRoomMemberIds}
+            onClose={() => closeMemberManager()}
+            onMemberToggle={toggleActiveRoomMember}
+            onPersonaPromptChange={setActiveRoomAiPersonaPrompt}
+            onSave={saveActiveRoomMembers}
+            personaPrompt={activeRoomAiPersonaPrompt}
+            roomActionError={roomActionError}
+            sortedOrgUsers={sortedOrgUsers}
           />
-          <button
-            aria-label="Insert Gemini mention"
-            className="grid h-11 w-11 place-items-center rounded-md border border-slate-300 bg-white text-slate-600 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700"
-            onClick={insertGeminiMention}
-            type="button"
-          >
-            <AtSign size={18} />
-          </button>
-          <button
-            aria-label="Send message"
-            className="grid h-11 w-11 place-items-center rounded-md bg-slate-800 text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={aiPending}
-            type="submit"
-          >
-            <Send size={18} />
-          </button>
-        </form>
+        ) : null}
+        <MessageList
+          messagesEndRef={messagesEndRef}
+          onReply={setReplyingTo}
+          orgUsers={orgUsers}
+          repliesByParentId={repliesByParentId}
+          topLevelMessages={topLevelMessages}
+        />
+        <MessageComposer
+          aiPending={aiPending}
+          draft={draft}
+          onCancelReply={() => setReplyingTo(null)}
+          onDraftChange={handleDraftChange}
+          onInsertGeminiMention={insertGeminiMention}
+          onSubmit={sendMessage}
+          replyingTo={replyingTo}
+          typingLabel={typingLabel}
+        />
         </section>
       </div>
     </main>
